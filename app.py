@@ -1,5 +1,4 @@
 import os, sys
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
@@ -7,7 +6,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
 import pandas as pd
-from tensorflow import keras
+import joblib
 
 from train_model  import (APPLIANCES, APPLIANCE_NAMES, APPLIANCE_WATTS,
                            CLASS_NAMES, CLASS_COLORS, COST_PER_KWH, NUM_FEATURES)
@@ -80,12 +79,8 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
     margin-bottom: 12px;
     box-shadow: 0 1px 6px rgba(26,86,219,0.05);
 }
-.rec-card-warn {
-    border-left: 4px solid #ff8800;
-}
-.rec-card-ok {
-    border-left: 4px solid #0e9f6e;
-}
+.rec-card-warn { border-left: 4px solid #ff8800; }
+.rec-card-ok   { border-left: 4px solid #0e9f6e; }
 .prediction-box {
     border-radius: 18px;
     padding: 28px 24px;
@@ -103,7 +98,6 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
 }
 [data-testid="stButton"] > button:hover {
     background: #1648c0 !important;
-    transform: translateY(-1px);
 }
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: #f5f7ff; }
@@ -111,7 +105,7 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ── Chart helpers ─────────────────────────────────────────────────────────────
+# ── Colors ────────────────────────────────────────────────────────────────────
 BG    = "#ffffff"
 FONT  = "#1e2a4a"
 GRID  = "#e8ecf8"
@@ -138,10 +132,10 @@ def chart_layout(height=260, barmode=None, yrange=None):
 # ── Load pretrained model ─────────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
-    model_path = os.path.join(os.path.dirname(__file__), "model/energy_cnn.keras")
+    model_path = os.path.join(os.path.dirname(__file__), "model/energy_model.pkl")
     if not os.path.exists(model_path):
         return None
-    return keras.models.load_model(model_path)
+    return joblib.load(model_path)
 
 model = load_model()
 
@@ -177,13 +171,13 @@ with st.sidebar:
     else:
         st.markdown("""
         <div style='background:#e8f5e9;border:1px solid #0e9f6e;border-radius:10px;padding:12px;margin-top:16px'>
-            <b style='color:#0e9f6e'>✅ CNN Model Ready</b><br>
-            <span style='font-size:0.78rem;color:#1e2a4a'>Pretrained · 4 classes · 10 appliances</span>
+            <b style='color:#0e9f6e'>✅ Model Ready</b><br>
+            <span style='font-size:0.78rem;color:#1e2a4a'>MLP Neural Network · 4 classes · 10 appliances</span>
         </div>
         """, unsafe_allow_html=True)
 
 
-# ── Main UI ───────────────────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style='margin-bottom:24px'>
     <div style='color:#6b7db3;font-size:0.82rem;text-transform:uppercase;letter-spacing:.1em'>AI-Powered</div>
@@ -191,106 +185,85 @@ st.markdown("""
         Smart Home <span style='color:#1a56db'>Energy Analyzer</span> ⚡
     </div>
     <div style='color:#6b7db3;font-size:0.93rem;margin-top:4px'>
-        Enter your daily appliance usage → CNN predicts your consumption level → Get personalized tips
+        Enter your daily appliance usage → Model predicts your consumption level → Get personalized tips
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 if model is None:
-    st.error("⚠️ CNN model not found. Please run `python train_model.py` first, then restart the app.")
+    st.error("⚠️ Model not found. Please run `python train_model.py` first, then restart the app.")
     st.stop()
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# SECTION 1: APPLIANCE USAGE INPUT
+# APPLIANCE SLIDERS
 # ════════════════════════════════════════════════════════════════════════════
 st.markdown("<div class='section-title'>🔌 Enter Your Daily Appliance Usage</div>", unsafe_allow_html=True)
 st.markdown("<p style='color:#6b7db3;font-size:0.88rem;margin-bottom:16px'>Move each slider to how many hours per day you use each appliance.</p>",
             unsafe_allow_html=True)
 
+DEFAULTS = {
+    "AC / Heater": 4.0, "Water Heater": 1.0, "Washing Machine": 0.5,
+    "Refrigerator": 24.0, "Dishwasher": 0.5, "Microwave": 0.5,
+    "Lights": 5.0, "TV / Entertainment": 3.0, "Computer / Laptop": 4.0, "Electric Oven": 0.5,
+}
+
 usage_hours = {}
+col1, col2  = st.columns(2)
 
-col1, col2 = st.columns(2)
-appliance_list = list(APPLIANCES.items())
-
-for i, (name, watts) in enumerate(appliance_list):
+for i, (name, watts) in enumerate(APPLIANCES.items()):
+    max_h = 24 if name == "Refrigerator" else 16
     with (col1 if i % 2 == 0 else col2):
-        max_h  = 24 if name == "Refrigerator" else 16
-        default = {
-            "AC / Heater":        4.0,
-            "Water Heater":       1.0,
-            "Washing Machine":    0.5,
-            "Refrigerator":       24.0,
-            "Dishwasher":         0.5,
-            "Microwave":          0.5,
-            "Lights":             5.0,
-            "TV / Entertainment": 3.0,
-            "Computer / Laptop":  4.0,
-            "Electric Oven":      0.5,
-        }.get(name, 2.0)
-
-        hours = st.slider(
+        usage_hours[name] = st.slider(
             f"{name}  ·  *{watts}W*",
-            min_value=0.0,
-            max_value=float(max_h),
-            value=default,
-            step=0.5,
-            help=f"Rated power: {watts}W | Daily kWh = {watts}/1000 × hours"
+            min_value=0.0, max_value=float(max_h),
+            value=DEFAULTS.get(name, 2.0), step=0.5,
+            help=f"Rated power: {watts}W | Daily kWh = hours × {watts}/1000"
         )
-        usage_hours[name] = hours
 
 st.markdown("<br>", unsafe_allow_html=True)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# ANALYSE BUTTON
-# ════════════════════════════════════════════════════════════════════════════
 analyse = st.button("⚡  Analyse My Energy Usage", use_container_width=True)
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# RESULTS
+# ════════════════════════════════════════════════════════════════════════════
 if analyse:
-    # ── Prepare input for CNN ─────────────────────────────────────────────────
-    hours_array = np.array([usage_hours[n] for n in APPLIANCE_NAMES], dtype=np.float32)
-    X_input     = hours_array.reshape(1, NUM_FEATURES, 1)
+    # ── Predict ───────────────────────────────────────────────────────────────
+    hours_array = np.array([usage_hours[n] for n in APPLIANCE_NAMES], dtype=np.float32).reshape(1, -1)
+    class_id    = int(model.predict(hours_array)[0])
+    probs       = model.predict_proba(hours_array)[0]
+    class_name  = CLASS_NAMES[class_id]
+    class_color = CLASS_COLORS[class_id]
 
-    probs      = model.predict(X_input, verbose=0)[0]
-    class_id   = int(np.argmax(probs))
-    class_name = CLASS_NAMES[class_id]
-    class_color= CLASS_COLORS[class_id]
-
-    # ── Daily calculations ────────────────────────────────────────────────────
-    kwh_per_app = {n: round(usage_hours[n] * APPLIANCE_WATTS[i] / 1000, 3)
-                   for i, n in enumerate(APPLIANCE_NAMES)}
+    # ── Calculations ──────────────────────────────────────────────────────────
+    kwh_per_app       = {n: round(usage_hours[n] * APPLIANCE_WATTS[i] / 1000, 3)
+                         for i, n in enumerate(APPLIANCE_NAMES)}
     total_daily_kwh   = round(sum(kwh_per_app.values()), 3)
     total_monthly_kwh = round(total_daily_kwh * 30, 1)
     monthly_cost      = round(total_monthly_kwh * cost_rate, 2)
     daily_cost        = round(total_daily_kwh * cost_rate, 3)
+    recs              = get_recommendations(usage_hours, class_id)
+    savings           = savings_estimate(usage_hours, class_id, cost_rate)
 
-    recs    = get_recommendations(usage_hours, class_id)
-    savings = savings_estimate(usage_hours, class_id, cost_rate)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # RESULT SECTION
-    # ══════════════════════════════════════════════════════════════════════════
     st.markdown("---")
     st.markdown("<div class='section-title'>📊 Analysis Results</div>", unsafe_allow_html=True)
 
-    # ── CNN Prediction box ────────────────────────────────────────────────────
+    # ── Prediction box ────────────────────────────────────────────────────────
     st.markdown(f"""
     <div class='prediction-box' style='background:{class_color}18;border:2px solid {class_color}'>
         <div style='font-size:3rem;margin-bottom:4px'>
             {"🟢" if class_id==0 else "🔵" if class_id==1 else "🟠" if class_id==2 else "🔴"}
         </div>
-        <div style='font-size:1.8rem;font-weight:800;color:{class_color}'>
-            {class_name} Consumption
-        </div>
+        <div style='font-size:1.8rem;font-weight:800;color:{class_color}'>{class_name} Consumption</div>
         <div style='color:#6b7db3;font-size:0.92rem;margin-top:6px'>
-            CNN Prediction · {total_daily_kwh} kWh/day · ${daily_cost}/day
+            Model Prediction · {total_daily_kwh} kWh/day · ${daily_cost}/day
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     # ── Confidence scores ─────────────────────────────────────────────────────
-    st.markdown("<div class='section-title'>🧠 CNN Confidence Scores</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>🧠 Model Confidence Scores</div>", unsafe_allow_html=True)
     conf_cols = st.columns(4)
     for i, (cls, prob, color) in enumerate(zip(CLASS_NAMES, probs, CLASS_COLORS)):
         with conf_cols[i]:
@@ -303,7 +276,7 @@ if analyse:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── KPI row ───────────────────────────────────────────────────────────────
+    # ── KPIs ──────────────────────────────────────────────────────────────────
     k1, k2, k3, k4 = st.columns(4)
     def kpi(col, icon, label, value, color=BLUE):
         col.markdown(f"""
@@ -314,15 +287,16 @@ if analyse:
         </div>
         """, unsafe_allow_html=True)
 
-    kpi(k1, "⚡", "Daily Usage",        f"{total_daily_kwh} kWh",    BLUE)
-    kpi(k2, "📅", "Monthly Usage",      f"{total_monthly_kwh} kWh",  ORG)
-    kpi(k3, "💰", "Monthly Cost",       f"${monthly_cost}",          RED)
-    kpi(k4, "💚", "Potential Saving",   f"${savings['monthly_saving_usd']}/mo", GREEN)
+    kpi(k1, "⚡", "Daily Usage",      f"{total_daily_kwh} kWh",   BLUE)
+    kpi(k2, "📅", "Monthly Usage",    f"{total_monthly_kwh} kWh", ORG)
+    kpi(k3, "💰", "Monthly Cost",     f"${monthly_cost}",         RED)
+    kpi(k4, "💚", "Potential Saving", f"${savings['monthly_saving_usd']}/mo", GREEN)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Charts ────────────────────────────────────────────────────────────────
     col1, col2 = st.columns(2)
+    over_map   = {r["appliance"]: r["over"] for r in recs}
 
     with col1:
         st.markdown("<div class='section-title'>🔌 Daily kWh by Appliance</div>", unsafe_allow_html=True)
@@ -330,12 +304,6 @@ if analyse:
             "Appliance": list(kwh_per_app.keys()),
             "kWh":       list(kwh_per_app.values()),
         }).sort_values("kWh", ascending=True)
-
-        bar_colors = [RED if r["over"] else GREEN
-                      for r in sorted(recs, key=lambda x: x["appliance"])
-                      if True]
-        # map colors to sorted appliances
-        over_map   = {r["appliance"]: r["over"] for r in recs}
         df_kwh["color"] = df_kwh["Appliance"].map(lambda x: RED if over_map.get(x) else GREEN)
 
         fig = go.Figure(go.Bar(
@@ -352,52 +320,42 @@ if analyse:
         st.markdown("<div class='section-title'>💰 Monthly Cost by Appliance ($)</div>", unsafe_allow_html=True)
         df_cost = df_kwh.copy()
         df_cost["Monthly Cost"] = (df_cost["kWh"] * 30 * cost_rate).round(2)
-
         fig2 = px.pie(
             df_cost[df_cost["kWh"] > 0],
             names="Appliance", values="Monthly Cost",
             color_discrete_sequence=px.colors.qualitative.Plotly,
         )
-        fig2.update_layout(
-            plot_bgcolor=BG, paper_bgcolor=BG,
-            font=dict(color=FONT), height=320,
-            margin=dict(l=0, r=0, t=10, b=0),
-        )
+        fig2.update_layout(plot_bgcolor=BG, paper_bgcolor=BG,
+                           font=dict(color=FONT), height=320,
+                           margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig2, use_container_width=True)
 
-    # ── Savings potential ─────────────────────────────────────────────────────
+    # ── Savings ───────────────────────────────────────────────────────────────
     st.markdown("<div class='section-title'>💚 Savings Potential</div>", unsafe_allow_html=True)
     st.markdown(f"""
     <div class='insight-box' style='border-left-color:{GREEN}'>
-        By optimising your overused appliances to efficient usage levels, you could reduce your
-        consumption from <b>{savings['current_monthly_kwh']} kWh/month</b> to
+        By optimising your overused appliances, you could reduce consumption from
+        <b>{savings['current_monthly_kwh']} kWh/month</b> to
         <b>{savings['optimised_monthly_kwh']} kWh/month</b> —
-        saving approximately <b style='color:{GREEN}'>${savings['monthly_saving_usd']}/month
-        ({savings['pct_saving']}%)</b> on your electricity bill.
+        saving <b style='color:{GREEN}'>${savings['monthly_saving_usd']}/month ({savings['pct_saving']}%)</b>.
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Before / After bar ────────────────────────────────────────────────────
     fig3 = go.Figure(go.Bar(
         x=["Current Usage", "Optimised Usage"],
         y=[savings["current_monthly_kwh"], savings["optimised_monthly_kwh"]],
         marker_color=[RED, GREEN],
-        text=[f"{savings['current_monthly_kwh']} kWh\n${round(savings['current_monthly_kwh']*cost_rate,2)}",
-              f"{savings['optimised_monthly_kwh']} kWh\n${round(savings['optimised_monthly_kwh']*cost_rate,2)}"],
-        textposition="outside",
-        width=0.4,
+        text=[f"{savings['current_monthly_kwh']} kWh", f"{savings['optimised_monthly_kwh']} kWh"],
+        textposition="outside", width=0.4,
     ))
     fig3.update_layout(**chart_layout(height=240, yrange=[0, savings["current_monthly_kwh"] * 1.35]))
     fig3.update_yaxes(title="kWh / month")
     st.plotly_chart(fig3, use_container_width=True)
 
-
-    # ════════════════════════════════════════════════════════════════════════
-    # RECOMMENDATIONS
-    # ════════════════════════════════════════════════════════════════════════
+    # ── Recommendations ───────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("<div class='section-title'>💡 Appliance-Level Recommendations</div>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#6b7db3;font-size:0.88rem;margin-bottom:16px'>Based on your <b>{class_name}</b> consumption profile. 🔴 Red = overused | 🟢 Green = efficient</p>",
+    st.markdown(f"<p style='color:#6b7db3;font-size:0.88rem;margin-bottom:16px'>🔴 Red = overused &nbsp;|&nbsp; 🟢 Green = efficient</p>",
                 unsafe_allow_html=True)
 
     rec_col1, rec_col2 = st.columns(2)
@@ -408,41 +366,43 @@ if analyse:
         monthly_kwh  = round(rec["daily_kwh"] * 30, 2)
         monthly_cost = round(monthly_kwh * cost_rate, 2)
 
-        card_html = f"""
-        <div class='{card_class}'>
-            <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>
-                <div style='font-weight:700;font-size:0.95rem;color:#1e2a4a'>{status_icon} {rec['appliance']}</div>
-                <div style='font-size:0.78rem;color:{status_color};font-weight:600;background:{status_color}18;
-                    padding:2px 10px;border-radius:20px'>
-                    {rec['hours']}h/day · {rec['daily_kwh']} kWh
+        with (rec_col1 if i % 2 == 0 else rec_col2):
+            st.markdown(f"""
+            <div class='{card_class}'>
+                <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>
+                    <div style='font-weight:700;font-size:0.95rem;color:#1e2a4a'>{status_icon} {rec['appliance']}</div>
+                    <div style='font-size:0.78rem;color:{status_color};font-weight:600;
+                        background:{status_color}18;padding:2px 10px;border-radius:20px'>
+                        {rec['hours']}h/day · {rec['daily_kwh']} kWh
+                    </div>
+                </div>
+                <div style='font-size:0.82rem;color:#6b7db3;margin-bottom:6px'>
+                    📅 Monthly: <b>{monthly_kwh} kWh</b> · 💰 <b>${monthly_cost}</b>
+                    {"  ·  ⚠️ Exceeds " + str(rec['threshold']) + "h/day limit" if rec['over'] else "  ·  ✅ Within efficient range"}
+                </div>
+                <div style='font-size:0.86rem;color:#1e2a4a;line-height:1.6;
+                    background:#f5f7ff;border-radius:8px;padding:8px 12px'>
+                    {rec['tip']}
                 </div>
             </div>
-            <div style='font-size:0.82rem;color:#6b7db3;margin-bottom:6px'>
-                📅 Monthly: <b>{monthly_kwh} kWh</b> · 💰 <b>${monthly_cost}</b>
-                {"  ·  ⚠️ Exceeds efficient limit of " + str(rec['threshold']) + "h/day" if rec['over'] else "  ·  ✅ Within efficient range"}
-            </div>
-            <div style='font-size:0.86rem;color:#1e2a4a;line-height:1.6;background:#f5f7ff;
-                border-radius:8px;padding:8px 12px'>
-                {rec['tip']}
-            </div>
-        </div>
-        """
-        with (rec_col1 if i % 2 == 0 else rec_col2):
-            st.markdown(card_html, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    # ── Efficiency score ──────────────────────────────────────────────────────
+    # ── Efficiency Score ──────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("<div class='section-title'>🏅 Your Home Efficiency Score</div>", unsafe_allow_html=True)
 
-    over_count   = sum(1 for r in recs if r["over"])
-    score        = max(10, round(100 - (class_id * 18) - (over_count * 7)))
-    score_color  = GREEN if score >= 70 else ORG if score >= 45 else RED
-    score_label  = "🏆 Excellent!" if score >= 70 else "👍 Good, room to improve" if score >= 45 else "⚠️ High usage detected"
+    over_count  = sum(1 for r in recs if r["over"])
+    score       = max(10, round(100 - (class_id * 18) - (over_count * 7)))
+    score       = min(100, score)
+    score_color = GREEN if score >= 70 else ORG if score >= 45 else RED
+    score_label = "🏆 Excellent!" if score >= 70 else "👍 Good, room to improve" if score >= 45 else "⚠️ High usage detected"
 
     st.markdown(f"""
     <div style='background:#ffffff;border:1px solid #dde3f5;border-radius:18px;
         padding:28px 24px;text-align:center;box-shadow:0 2px 10px rgba(26,86,219,0.07);margin-bottom:20px'>
-        <div style='font-size:3.5rem;font-weight:800;color:{score_color}'>{score}<span style='font-size:1.5rem'>/100</span></div>
+        <div style='font-size:3.5rem;font-weight:800;color:{score_color}'>
+            {score}<span style='font-size:1.5rem'>/100</span>
+        </div>
         <div style='color:#6b7db3;font-size:0.9rem;margin-top:4px'>Home Energy Efficiency Score</div>
         <div style='background:#e8ecf8;border-radius:8px;height:18px;margin:16px auto;max-width:500px;overflow:hidden'>
             <div style='width:{score}%;background:linear-gradient(90deg,{GREEN},{score_color});
@@ -456,7 +416,6 @@ if analyse:
     """, unsafe_allow_html=True)
 
 else:
-    # ── Placeholder when not yet analysed ─────────────────────────────────────
     st.markdown("""
     <div style='text-align:center;padding:60px 20px;color:#6b7db3'>
         <div style='font-size:4rem'>🏠</div>
@@ -464,8 +423,8 @@ else:
             Set your appliance usage above
         </div>
         <div style='font-size:0.92rem'>
-            Adjust the sliders for each appliance, then click <b>Analyse My Energy Usage</b><br>
-            to get your CNN-powered consumption prediction and personalized tips.
+            Adjust the sliders for each appliance, then click
+            <b>Analyse My Energy Usage</b> to get your prediction and personalized tips.
         </div>
     </div>
     """, unsafe_allow_html=True)

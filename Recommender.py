@@ -1,13 +1,12 @@
 """
-Rule-based appliance recommendations based on usage hours and CNN prediction.
+Rule-based appliance recommendations based on usage hours and model prediction.
 """
 
-# Thresholds: max "efficient" hours per day per appliance
 EFFICIENT_HOURS = {
     "AC / Heater":        6,
     "Water Heater":       1.5,
     "Washing Machine":    1,
-    "Refrigerator":       24,   # always on — flag by wattage instead
+    "Refrigerator":       24,
     "Dishwasher":         1,
     "Microwave":          1,
     "Lights":             6,
@@ -45,11 +44,12 @@ TIPS = {
         "🍽️ Only run the dishwasher when fully loaded.",
         "♨️ Use the eco wash mode — it uses less water and lower temperatures.",
         "🌬️ Skip the heated dry cycle and let dishes air dry instead.",
-        "⏰ Run dishwasher at night (off-peak hours) if your utility offers time-of-use pricing.",
+        "⏰ Run dishwasher at night during off-peak hours.",
     ],
     "Microwave": [
         "✅ Microwaves are already very efficient — use them instead of the oven for small meals.",
         "⏰ Defrost food in the fridge overnight instead of using the microwave defrost cycle.",
+        "🫙 Cover food when microwaving — it heats faster and uses less energy.",
         "🫙 Cover food when microwaving — it heats faster and uses less energy.",
     ],
     "Lights": [
@@ -61,8 +61,8 @@ TIPS = {
     "TV / Entertainment": [
         "📺 Enable auto-brightness on your TV — it adjusts backlight and reduces consumption.",
         "😴 Use sleep timers so the TV automatically turns off when you fall asleep.",
-        "🔌 Unplug gaming consoles and entertainment systems when not in use — they draw standby power.",
-        "📡 Use streaming devices (Chromecast, Fire Stick) instead of full gaming consoles for video.",
+        "🔌 Unplug gaming consoles when not in use — they draw standby power.",
+        "📡 Use streaming sticks instead of full gaming consoles for video.",
     ],
     "Computer / Laptop": [
         "💻 Use a laptop instead of a desktop — laptops use up to 80% less energy.",
@@ -71,7 +71,7 @@ TIPS = {
         "🔌 Unplug the charger once the laptop is fully charged.",
     ],
     "Electric Oven": [
-        "🍳 Use a microwave, air fryer, or toaster oven for small meals — they use far less energy.",
+        "🍳 Use a microwave or air fryer for small meals — they use far less energy.",
         "🚫 Avoid preheating the oven for longer than needed — 10 minutes is usually enough.",
         "🍲 Cook multiple dishes at once to maximise each oven session.",
         "🌡️ Don't open the oven door while cooking — each opening drops temperature by 15°C.",
@@ -80,12 +80,7 @@ TIPS = {
 
 
 def get_recommendations(usage_hours: dict, class_id: int) -> list:
-    """
-    Returns a list of recommendation dicts for appliances that exceed efficient hours.
-    Always returns at least top-3 heaviest consumers.
-    """
     from train_model import APPLIANCE_WATTS, APPLIANCE_NAMES
-
     watts_map = dict(zip(APPLIANCE_NAMES, APPLIANCE_WATTS))
     results   = []
 
@@ -94,10 +89,8 @@ def get_recommendations(usage_hours: dict, class_id: int) -> list:
         watts     = watts_map.get(appliance, 500)
         daily_kwh = round(hours * watts / 1000, 3)
         over      = hours > threshold
-
-        # Pick most relevant tip
-        tips = TIPS.get(appliance, ["Consider reducing usage time."])
-        tip  = tips[min(class_id, len(tips) - 1)]
+        tips      = TIPS.get(appliance, ["Consider reducing usage time."])
+        tip       = tips[min(class_id, len(tips) - 1)]
 
         results.append({
             "appliance": appliance,
@@ -109,13 +102,11 @@ def get_recommendations(usage_hours: dict, class_id: int) -> list:
             "watts":     watts,
         })
 
-    # Sort: overused first, then by kWh descending
     results.sort(key=lambda x: (-int(x["over"]), -x["daily_kwh"]))
     return results
 
 
 def savings_estimate(usage_hours: dict, class_id: int, cost_per_kwh: float = 0.12) -> dict:
-    """Estimate potential monthly savings if user reduces overused appliances by 20%."""
     from train_model import APPLIANCE_WATTS, APPLIANCE_NAMES
     watts_map = dict(zip(APPLIANCE_NAMES, APPLIANCE_WATTS))
 
